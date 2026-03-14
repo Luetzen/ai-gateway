@@ -1,0 +1,29 @@
+[package]
+name = "ai-gateway"
+version = "0.1.0"
+edition = "2021"
+authors = ["Luetzen"]
+description = "Provider-agnostic AI gateway — supports LM Studio (local), Anthropic, and Google Gemini (cloud)"
+license = "MIT"
+repository = "https://github.com/Luetzen/ai-gateway"
+readme = "README.md"
+keywords = ["ai", "llm", "anthropic", "gemini", "gateway"]
+categories = ["api-bindings", "asynchronous"]
+
+[dependencies]
+# HTTP Client
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Async Runtime
+tokio = { version = "1", features = ["time"] }
+
+# Logging
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+tokio-test = "0.4"
