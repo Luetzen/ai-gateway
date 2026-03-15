@@ -163,9 +163,10 @@ pub async fn chat_local(
         return Err(AiError::ApiError { status, body });
     }
 
-    let parsed: OpenAiChatResponse = resp.json().await.map_err(|e| {
-        AiError::ParseError(format!("Failed to parse LM Studio response: {}", e))
-    })?;
+    let parsed: OpenAiChatResponse = resp
+        .json()
+        .await
+        .map_err(|e| AiError::ParseError(format!("Failed to parse LM Studio response: {}", e)))?;
 
     let content = parsed
         .choices
@@ -186,10 +187,7 @@ pub async fn chat_local(
 }
 
 /// List models available on LM Studio.
-pub async fn list_models(
-    http: &Client,
-    config: &AiConfig,
-) -> Result<Vec<LmStudioModel>, AiError> {
+pub async fn list_models(http: &Client, config: &AiConfig) -> Result<Vec<LmStudioModel>, AiError> {
     let base_url = config
         .lm_studio_url
         .as_ref()
@@ -241,11 +239,7 @@ pub async fn list_models(
 ///
 /// This tells LM Studio to load the model into GPU memory. Useful when the
 /// gaming PC just booted and no model is loaded yet.
-pub async fn load_model(
-    http: &Client,
-    config: &AiConfig,
-    model_name: &str,
-) -> Result<(), AiError> {
+pub async fn load_model(http: &Client, config: &AiConfig, model_name: &str) -> Result<(), AiError> {
     let base_url = config
         .lm_studio_url
         .as_ref()
