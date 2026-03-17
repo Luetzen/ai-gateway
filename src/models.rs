@@ -102,11 +102,43 @@ pub enum AiModel {
 // Messages
 // =============================================================================
 
+/// A content part within a message — either text or an image.
+///
+/// Used for multimodal (vision) requests where a message contains both
+/// text instructions and one or more images.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AiContentPart {
+    /// A text content block.
+    Text { text: String },
+    /// A base64-encoded image.
+    Image {
+        /// Base64-encoded image data (no data-URI prefix).
+        data: String,
+        /// MIME type, e.g. "image/png", "image/jpeg", "image/webp".
+        #[serde(default = "default_image_mime")]
+        media_type: String,
+    },
+}
+
+fn default_image_mime() -> String {
+    "image/png".to_string()
+}
+
 /// A single message in a conversation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiMessage {
     pub role: AiRole,
     pub content: String,
+
+    /// Optional image attachments for vision/multimodal requests.
+    ///
+    /// When this is non-empty, providers that support vision will send
+    /// the message as a multimodal content array (text + images).
+    /// Providers that don't support vision will ignore images and only
+    /// send the text `content`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<AiContentPart>,
 }
 
 impl AiMessage {
@@ -114,6 +146,7 @@ impl AiMessage {
         Self {
             role: AiRole::User,
             content: content.into(),
+            images: Vec::new(),
         }
     }
 
@@ -121,6 +154,22 @@ impl AiMessage {
         Self {
             role: AiRole::Assistant,
             content: content.into(),
+            images: Vec::new(),
+        }
+    }
+
+    /// Create a user message with one or more base64-encoded images.
+    ///
+    /// The `content` is the text instruction (e.g. "Analyze this screenshot").
+    /// Each tuple in `images` is `(base64_data, media_type)`.
+    pub fn user_with_images(content: impl Into<String>, images: Vec<(String, String)>) -> Self {
+        Self {
+            role: AiRole::User,
+            content: content.into(),
+            images: images
+                .into_iter()
+                .map(|(data, media_type)| AiContentPart::Image { data, media_type })
+                .collect(),
         }
     }
 }
@@ -275,10 +324,38 @@ mod tests {
         let user_msg = AiMessage::user("Hello");
         assert_eq!(user_msg.role, AiRole::User);
         assert_eq!(user_msg.content, "Hello");
+        assert!(user_msg.images.is_empty());
 
         let asst_msg = AiMessage::assistant("Hi there");
         assert_eq!(asst_msg.role, AiRole::Assistant);
         assert_eq!(asst_msg.content, "Hi there");
+        assert!(asst_msg.images.is_empty());
+    }
+
+    #[test]
+    fn test_ai_message_with_images() {
+        let msg = AiMessage::user_with_images(
+            "Analyze this screenshot",
+            vec![("abc123base64".to_string(), "image/png".to_string())],
+        );
+        assert_eq!(msg.role, AiRole::User);
+        assert_eq!(msg.content, "Analyze this screenshot");
+        assert_eq!(msg.images.len(), 1);
+        match &msg.images[0] {
+            AiContentPart::Image { data, media_type } => {
+                assert_eq!(data, "abc123base64");
+                assert_eq!(media_type, "image/png");
+            }
+            _ => panic!("Expected Image variant"),
+        }
+    }
+
+    #[test]
+    fn test_ai_message_without_images_serializes_cleanly() {
+        let msg = AiMessage::user("Hello");
+        let json = serde_json::to_string(&msg).unwrap();
+        // images field should be omitted when empty
+        assert!(!json.contains("images"));
     }
 
     #[test]

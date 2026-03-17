@@ -28,10 +28,48 @@ struct AnthropicChatRequest {
     temperature: Option<f64>,
 }
 
+/// An Anthropic message — supports both simple text and multimodal content blocks.
 #[derive(Debug, Serialize)]
 struct AnthropicMessage {
     role: String,
-    content: String,
+    /// Content can be a simple string OR an array of content blocks (for vision).
+    content: AnthropicMessageContent,
+}
+
+/// Anthropic supports two content formats:
+/// - A plain string (for text-only messages)
+/// - An array of content blocks (for multimodal messages with images)
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum AnthropicMessageContent {
+    /// Simple text content (most messages).
+    Text(String),
+    /// Array of content blocks — used for vision/multimodal requests.
+    Blocks(Vec<AnthropicContentBlock>),
+}
+
+/// A single content block in a multimodal Anthropic message.
+#[derive(Debug, Serialize)]
+#[serde(tag = "type")]
+enum AnthropicContentBlock {
+    /// A text content block.
+    #[serde(rename = "text")]
+    Text { text: String },
+    /// An image content block (base64-encoded).
+    #[serde(rename = "image")]
+    Image { source: AnthropicImageSource },
+}
+
+/// Source for an Anthropic image content block.
+#[derive(Debug, Serialize)]
+struct AnthropicImageSource {
+    /// Always "base64" for inline images.
+    #[serde(rename = "type")]
+    source_type: String,
+    /// MIME type: "image/png", "image/jpeg", "image/gif", "image/webp".
+    media_type: String,
+    /// Base64-encoded image data.
+    data: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -78,9 +116,46 @@ pub async fn chat_anthropic(
     let messages: Vec<AnthropicMessage> = request
         .messages
         .iter()
-        .map(|m| AnthropicMessage {
-            role: m.role.to_string(),
-            content: m.content.clone(),
+        .map(|m| {
+            // Check if this message has image attachments (vision/multimodal)
+            if m.images.is_empty() {
+                // Simple text message
+                AnthropicMessage {
+                    role: m.role.to_string(),
+                    content: AnthropicMessageContent::Text(m.content.clone()),
+                }
+            } else {
+                // Multimodal message: build content blocks array
+                // Images come first, then the text instruction
+                let mut blocks: Vec<AnthropicContentBlock> = m
+                    .images
+                    .iter()
+                    .filter_map(|part| match part {
+                        AiContentPart::Image { data, media_type } => {
+                            Some(AnthropicContentBlock::Image {
+                                source: AnthropicImageSource {
+                                    source_type: "base64".to_string(),
+                                    media_type: media_type.clone(),
+                                    data: data.clone(),
+                                },
+                            })
+                        }
+                        _ => None,
+                    })
+                    .collect();
+
+                // Add the text content after the images
+                if !m.content.is_empty() {
+                    blocks.push(AnthropicContentBlock::Text {
+                        text: m.content.clone(),
+                    });
+                }
+
+                AnthropicMessage {
+                    role: m.role.to_string(),
+                    content: AnthropicMessageContent::Blocks(blocks),
+                }
+            }
         })
         .collect();
 

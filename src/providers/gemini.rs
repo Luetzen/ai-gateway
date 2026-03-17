@@ -42,14 +42,35 @@ struct GeminiContent {
     parts: Vec<GeminiPart>,
 }
 
+/// A Gemini content part — either text or inline image data.
+///
+/// Uses `#[serde(untagged)]` so that each variant serializes to its own
+/// shape without a wrapping tag:
+///   - Text:  `{ "text": "..." }`
+///   - Image: `{ "inline_data": { "mime_type": "...", "data": "..." } }`
 #[derive(Debug, Serialize)]
-struct GeminiPart {
-    text: String,
+#[serde(untagged)]
+enum GeminiPart {
+    Text { text: String },
+    InlineData { inline_data: GeminiInlineData },
+}
+
+/// Inline image data for Gemini vision requests.
+#[derive(Debug, Serialize)]
+struct GeminiInlineData {
+    mime_type: String,
+    data: String,
 }
 
 #[derive(Debug, Serialize)]
 struct GeminiSystemInstruction {
-    parts: Vec<GeminiPart>,
+    parts: Vec<GeminiSystemPart>,
+}
+
+/// System instruction parts are always text-only.
+#[derive(Debug, Serialize)]
+struct GeminiSystemPart {
+    text: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -154,14 +175,44 @@ pub async fn chat_gemini(
     let contents: Vec<GeminiContent> = request
         .messages
         .iter()
-        .map(|m| GeminiContent {
-            role: match m.role {
+        .map(|m| {
+            let role = match m.role {
                 AiRole::User => "user".to_string(),
                 AiRole::Assistant => "model".to_string(),
-            },
-            parts: vec![GeminiPart {
-                text: m.content.clone(),
-            }],
+            };
+
+            if m.images.is_empty() {
+                // Simple text-only message
+                GeminiContent {
+                    role,
+                    parts: vec![GeminiPart::Text {
+                        text: m.content.clone(),
+                    }],
+                }
+            } else {
+                // Multimodal message: images first, then text
+                let mut parts: Vec<GeminiPart> = m
+                    .images
+                    .iter()
+                    .filter_map(|img| match img {
+                        AiContentPart::Image { data, media_type } => Some(GeminiPart::InlineData {
+                            inline_data: GeminiInlineData {
+                                mime_type: media_type.clone(),
+                                data: data.clone(),
+                            },
+                        }),
+                        _ => None,
+                    })
+                    .collect();
+
+                if !m.content.is_empty() {
+                    parts.push(GeminiPart::Text {
+                        text: m.content.clone(),
+                    });
+                }
+
+                GeminiContent { role, parts }
+            }
         })
         .collect();
 
@@ -178,7 +229,7 @@ pub async fn chat_gemini(
     };
 
     let system_instruction = system_text.map(|text| GeminiSystemInstruction {
-        parts: vec![GeminiPart { text }],
+        parts: vec![GeminiSystemPart { text }],
     });
 
     // Generation config
